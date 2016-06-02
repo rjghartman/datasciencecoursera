@@ -1,0 +1,105 @@
+---
+title: "Practical Machine Learning"
+author: "R Hartman"
+date: "2 juni 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+
+```
+###Abstract
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this study, data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants are used to fit a model in order to predict if people are performing the activity (weightlifting) in a good way. The latter is classified in 5 classes (A,B,C,D,E). The model is then used to predict cases of a testset.
+
+###Data loading and cleaning
+
+The following code loades the data in, assuming it is present in the working directory. The seed is also set for random number generation. 
+```{r}
+set.seed(2292)
+training <- read.csv("pml-training.csv", na.strings = c("", "NA"))
+testing <- read.csv("pml-testing.csv", na.strings = c("", "NA"))
+```  
+  
+Glancing over the data already shows the training-set is huge with a lot of variables.
+```{r}
+dim(training)
+```  
+
+This data-set clearly needs some cleaning up with 160 variables, before a model is fitted, as otherwise this will take too much time. Likewise, a pairplot will not be presented, as this will be way too crowded.
+First, variables that contain only NA values will be removed, as these variables do not add anything to the coming model.
+```{r}
+training2 <- training[,colSums(is.na(training))==0]
+```  
+  
+The first seven variables (named "X","user_name","raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window"), probably have nothing to do with movement and thus defining the class of activity. Thus, these variables are removed. 
+```{r}
+training3 <- training2[,-(1:7)]
+```  
+  
+With having dismissed over 100 variables, the model fit should go way faster.  
+For some preprocessing, the data-set is checked for any variables that have near zero variance, which would otherwise have no impact on the model at all.
+```{r}
+library(caret)
+nsv <- nearZeroVar(training3, saveMetrics = TRUE)
+sum(nsv$zeroVar)
+```
+So, the data-set does not contain variables with near zero variance and is clean enough for model fitting.  
+
+###Cross validation
+
+Two other sets are created out of this training3 data-set for cross-validation. The data-set **trainingset**, which is used for training the model. And the **testset**, which is used to test the model, to find out if it has acceptable accuracy.
+```{r}
+inTrain <- createDataPartition(y=training3$classe, p=0.7, list = FALSE)
+trainingset <- training3[inTrain,]
+testset <- training3[-inTrain,]
+```  
+  
+###First model
+
+The first model is a model trained on all the variables that are left over, predicting by using a classification tree (method **rpart**). This method is done as a quick and dirty way, to see how the model fits without much processing work.
+```{r}
+library(rpart)
+model1 <- train(classe~., method = "rpart",data=trainingset)
+predict1 <- predict(model1, testset)
+confusionMatrix(predict1, testset$classe)$overall
+```  
+  
+As we can see by the output from the confusionMatrix call, the accuracy when using this method on the testset, and comparing these outcomes with the actual values in the testset, is around 50%, which is **not** acceptable.
+
+###Second and final model  
+
+This second model uses the random forests method, with a preprocessing principal component analysis step. Resampling by trainControl is done according to cross validation, taking 5 subsamples.  
+I chose this method, because random forests is one of the strongest methods presently to predict, and PCA is a great way to preprocess your data by reducing the number of variables by taking principal components. "cv" as method is chosen instead of the default bootstrapping method under traincontrol, as bootstrapping takes way too long in combination with random forests. 
+
+```{r, cache=TRUE}
+library(randomForest)
+model2 <- train(classe~., method = "rf", preProcess = "pca", data=trainingset, trControl = trainControl(method = "cv", number = 5))
+predict2 <- predict(model2, testset)
+accuracy <- confusionMatrix(predict2, testset$classe)$overall[[1]]
+oob <- 1 - accuracy
+oob
+```
+The out of sample error rate for this model (oob) is 1 - accuracy.
+This is definitely acceptable with an accuracy of `r accuracy*100`%.
+In order to see if we are overfitting with so many variables, a diagnostic plot is shown below.
+```{r, fig.align="center", fig.height = 3, fig.width = 3}
+plot(model2)
+```  
+
+Here we can see that the accuracy does not decrease much with fitting more variables.  
+
+With this model we will predict the values of the actual testing data-set, which values will be filled into the quiz. 
+```{r, include=FALSE}
+library(randomForest)
+```
+```{r}
+predict3 <- predict(model2, testing)
+predict3
+```
+  
+Overall, model2 fits the data really well, with a very low out of sample error rate of `r oob`.  
+
+**This concludes the report about the Weight Lifting Exercise Dataset.**
